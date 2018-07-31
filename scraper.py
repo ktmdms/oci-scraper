@@ -45,18 +45,21 @@ def get_subscribed_regions():
 
 def create_compute_dataframe(config, compartments):
     """ """
-    df = pd.DataFrame({}, columns=['Region', 'Compartment', 'AD', 'Name', 
-                                    'Shape', 'Time created'])
+    df = pd.DataFrame({}, columns=['Region', 'Compartment', 'AD', 'Name', 'Shape', 
+                                   'Defined tags', 'Freeform tags', 'Time created'])
+
     for results in scrape_compute(config, compartments):
         (compartment, instances) = results
         if instances:
             df_tmp = pd.DataFrame({'Region': config['region'], 
-                                    'Compartment': compartment, 
-                                    'AD': [x.availability_domain for x in instances],
-                                    'Name': [x.display_name for x in instances],
-                                    'Shape': [x.shape for x in instances],
-                                    'Time created': [x.time_created for x in instances],
-                                    })
+                                   'Compartment': compartment, 
+                                   'AD': [x.availability_domain for x in instances],
+                                   'Name': [x.display_name for x in instances],
+                                   'Shape': [x.shape for x in instances],
+                                   'Defined tags': [x.defined_tags for x in instances],
+                                   'Freeform tags': [x.freeform_tags for x in instances],
+                                   'Time created': [x.time_created for x in instances],
+                                   })
             df = pd.concat([df, df_tmp], ignore_index=True, sort=False)
 
     return df
@@ -65,18 +68,22 @@ def create_compute_dataframe(config, compartments):
 def create_storage_dataframe(config, compartments):
     """ """
     df = pd.DataFrame({}, columns=['Region', 'Compartment', 'AD', 'Name', 
-                                    'Size GB', 'Size MB', 'Time created'])
+                                    'Size GB', 'Size MB', 'Defined tags', 
+                                    'Freeform tags', 'Time created'])
+
     for results in scrape_storage(config, compartments):
         (compartment, volumes) = results
         if volumes:
             df_tmp = pd.DataFrame({'Region': config['region'],
-                                    'Compartment': compartment, 
-                                    'AD': [x.availability_domain for x in volumes],
-                                    'Name': [x.display_name for x in volumes],
-                                    'Size MB': [x.size_in_mbs for x in volumes],
-                                    'Size GB': [x.size_in_gbs for x in volumes],
-                                    'Time created': [x.time_created for x in volumes],
-                                    })
+                                   'Compartment': compartment, 
+                                   'AD': [x.availability_domain for x in volumes],
+                                   'Name': [x.display_name for x in volumes],
+                                   'Size MB': [x.size_in_mbs for x in volumes],
+                                   'Size GB': [x.size_in_gbs for x in volumes],
+                                   'Defined tags': [x.defined_tags for x in volumes],
+                                   'Freeform tags': [x.freeform_tags for x in volumes],
+                                   'Time created': [x.time_created for x in volumes],
+                                   })
             df = pd.concat([df, df_tmp], ignore_index=True, sort=False)
 
     return df
@@ -85,7 +92,8 @@ def create_storage_dataframe(config, compartments):
 def create_network_dataframe(config, compartments):
     """ """
     df = pd.DataFrame({}, columns=['Region', 'Compartment', 'CIDR block', 'Name', 
-                                    'DNS label', 'VCN domain name', 'Time created'])
+                                    'DNS label', 'VCN domain name', 'Defined tags', 
+                                    'Freeform tags', 'Time created'])
                                             
     for results in scrape_network(config, compartments):
         (compartment, networks) = results
@@ -96,6 +104,8 @@ def create_network_dataframe(config, compartments):
                                     'Name': [x.display_name for x in networks],
                                     'DNS label': [x.dns_label for x in networks],
                                     'VCN domain name': [x.vcn_domain_name for x in networks],
+                                    'Defined tags': [x.defined_tags for x in networks],
+                                    'Freeform tags': [x.freeform_tags for x in networks],
                                     'Time created': [x.time_created for x in networks],
                                     })
             df = pd.concat([df, df_tmp], ignore_index=True, sort=False)
