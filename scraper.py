@@ -10,9 +10,10 @@ import oci
 
 # The lifecycle_state parameter only allows one at a time (per fetch), python-sdk limitation.
 LC_STATE={
-        'COMPUTE': 'RUNNING',
-        'STORAGE': 'AVAILABLE',
-        'NETWORK': 'AVAILABLE',
+        'INSTANCE': 'RUNNING',
+        'VOLUME': 'AVAILABLE',
+        'VCN': 'AVAILABLE',
+        'LOADBALANCER': 'ACTIVE',
         }
 
 
@@ -43,7 +44,7 @@ def get_subscribed_regions():
     return identity_client.list_region_subscriptions(config['tenancy']).data
 
 
-def create_compute_dataframe(config, compartments):
+def create_instance_dataframe(config, compartments):
     """ """
     df = pd.DataFrame({}, columns=['Region', 'Compartment', 'AD', 'Name', 'Shape', 
                                    'Defined tags', 'Freeform tags', 'Time created'])
@@ -65,7 +66,7 @@ def create_compute_dataframe(config, compartments):
     return df
 
 
-def create_storage_dataframe(config, compartments):
+def create_volume_dataframe(config, compartments):
     """ """
     df = pd.DataFrame({}, columns=['Region', 'Compartment', 'AD', 'Name', 
                                     'Size GB', 'Size MB', 'Defined tags', 
@@ -89,7 +90,7 @@ def create_storage_dataframe(config, compartments):
     return df
 
 
-def create_network_dataframe(config, compartments):
+def create_vcn_dataframe(config, compartments):
     """ """
     df = pd.DataFrame({}, columns=['Region', 'Compartment', 'CIDR block', 'Name', 
                                     'DNS label', 'VCN domain name', 'Defined tags', 
@@ -113,15 +114,33 @@ def create_network_dataframe(config, compartments):
     return df
 
 
+def create_loadbalancer_dataframe(config, compartments):
+    """ """
+    df = pd.DataFrame({}, columns=['Region', 'Compartment', 'Name', 'Shape name', 'Time created'])
+                                            
+    for results in scrape_loadbalancers(config, compartments):
+        (compartment, loadbalancers) = results
+        if loadbalancers:
+            df_tmp = pd.DataFrame({'Region': config['region'], 
+                                    'Compartment': compartment, 
+                                    'Name': [x.display_name for x in loadbalancers],
+                                    'Shape name': [x.shape_name for x in loadbalancers],
+                                    'Time created': [x.time_created for x in loadbalancers],
+                                    })
+            df = pd.concat([df, df_tmp], ignore_index=True, sort=False)
+
+    return df
+
+
 @timer
 def scrape_compute(config, compartments):
     """ """
     compute = oci.core.ComputeClient(config)
     for c_name, c_id in compartments.items():
-        instances_raw = compute.list_instances(c_id, lifecycle_state=LC_STATE['COMPUTE'])
+        instances_raw = compute.list_instances(c_id, lifecycle_state=LC_STATE['INSTANCE'])
         instances = instances_raw.data
         while instances_raw.has_next_page:
-            instances_raw = compute.list_instances(c_id, lifecycle_state=LC_STATE['COMPUTE'],
+            instances_raw = compute.list_instances(c_id, lifecycle_state=LC_STATE['INSTANCE'],
                                                   page=instances_raw.next_page)
             instances.extend(instances_raw.data)
         yield (c_name, instances)
@@ -132,7 +151,7 @@ def scrape_storage(config, compartments):
     """ """
     volume = oci.core.BlockstorageClient(config)
     for c_name, c_id in compartments.items():
-        block_volumes = volume.list_volumes(c_id, lifecycle_state=LC_STATE['STORAGE']).data
+        block_volumes = volume.list_volumes(c_id, lifecycle_state=LC_STATE['VOLUME']).data
         yield (c_name, block_volumes)
 
 
@@ -141,8 +160,17 @@ def scrape_network(config, compartments):
     """ """
     network = oci.core.VirtualNetworkClient(config)
     for c_name, c_id in compartments.items():
-        vcns = network.list_vcns(c_id, lifecycle_state=LC_STATE['NETWORK']).data
+        vcns = network.list_vcns(c_id, lifecycle_state=LC_STATE['VCN']).data
         yield (c_name, vcns)
+
+
+@timer
+def scrape_loadbalancers(config, compartments):
+    """ """
+    lb = oci.load_balancer.LoadBalancerClient(config)
+    for c_name, c_id in compartments.items():
+        lbs = lb.list_load_balancers(c_id, lifecycle_state=LC_STATE['LOADBALANCER']).data
+        yield (c_name, lbs)
 
 
 @timer
@@ -158,10 +186,12 @@ def scrape_a_region(region):
     if not compartments:
         raise ValueError('could not find any compartments.')
 
-    # We generate a dataframe per Service, Compute, Storage and Network.
-    create_compute_dataframe(config, compartments).to_csv(f'compute_{region.region_name}.csv')
-    create_storage_dataframe(config, compartments).to_csv(f'storage_{region.region_name}.csv')
-    create_network_dataframe(config, compartments).to_csv(f'network_{region.region_name}.csv')
+    # We generate a dataframe per SubService, e.g. Compute->instance, Storage->volume
+    # Network->vcn, Loadbalancer->loadbalancer.
+#    create_instance_dataframe(config, compartments).to_csv(f'instance_{region.region_name}.csv')
+#    create_volume_dataframe(config, compartments).to_csv(f'volume_{region.region_name}.csv')
+#    create_vcn_dataframe(config, compartments).to_csv(f'vcn_{region.region_name}.csv')
+    create_loadbalancer_dataframe(config, compartments).to_csv(f'loadbalancer_{region.region_name}.csv')
 
 
 @timer
