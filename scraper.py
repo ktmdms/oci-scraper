@@ -58,7 +58,9 @@ def create_compute_dataframe(config, compartments):
                                     'Time created': [x.time_created for x in instances],
                                     })
             df = pd.concat([df, df_tmp], ignore_index=True, sort=False)
+
     return df
+
 
 def create_storage_dataframe(config, compartments):
     """ """
@@ -76,7 +78,9 @@ def create_storage_dataframe(config, compartments):
                                     'Time created': [x.time_created for x in volumes],
                                     })
             df = pd.concat([df, df_tmp], ignore_index=True, sort=False)
+
     return df
+
 
 def create_network_dataframe(config, compartments):
     """ """
@@ -95,6 +99,7 @@ def create_network_dataframe(config, compartments):
                                     'Time created': [x.time_created for x in networks],
                                     })
             df = pd.concat([df, df_tmp], ignore_index=True, sort=False)
+
     return df
 
 
