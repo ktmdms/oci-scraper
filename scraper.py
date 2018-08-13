@@ -1,11 +1,18 @@
 """ """
 import logging
+
 from time import time
 from functools import partial, wraps
 from collections import Counter
 
 import pandas as pd
-import oci
+
+from oci.config import from_file
+from oci.core import ComputeClient as ccli
+from oci.core import BlockstorageClient as bscli
+from oci.core import VirtualNetworkClient as netcli
+from oci.identity import IdentityClient as icli
+from oci.load_balancer import LoadBalancerClient as lbcli
 
 # The lifecycle_state parameter only allows one at a time (per fetch), python-sdk limitation.
 LC_STATE={
@@ -15,17 +22,23 @@ LC_STATE={
         'LOAD_BALANCER': 'ACTIVE',
         }
 
+try:
+    logging.basicConfig(format='%(asctime)s %(message)s', datefmt='%m/%d/%Y %I:%M:%S %p', \
+                        filename="scraper.log", level=logging.DEBUG)
+except:
+    raise
+
 
 def timer(func):
     """ Decorator that calculates the time a function takes to run (only logged in DEBUG mode).
-        Uses logging.debug to record the execution time, and the logger must be setup in advance.
+        Uses logging.info to record the execution time, and the logger must be setup in advance.
     """
     @wraps(func)
     def wrapf(*args, **kwargs):
         before = time()
         rv = func(*args, **kwargs)
         after = time()
-        logging.debug(f"[[ F({func.__name__}) || EXEC TIME = {(after - before) * 1000:.2f} msec. ]]")
+        logging.info(f"[[ F({func.__name__}) || EXEC TIME = {(after - before) * 1000:.2f} msec. ]]")
         return rv
     return wrapf
 
@@ -37,10 +50,8 @@ def get_subscribed_regions():
         subscribed regions (allowed) to my user credentials, from the returned
         object it returns the .data attribute which contains the actual payload.
     """
-    config = oci.config.from_file()
-    identity_client = oci.identity.IdentityClient(config)
-
-    return identity_client.list_region_subscriptions(config['tenancy']).data
+    cfg = from_file()
+    return icli(cfg).list_region_subscriptions(cfg['tenancy']).data
 
 
 def create_instance_dataframe(scrape_regional_results):
@@ -50,6 +61,7 @@ def create_instance_dataframe(scrape_regional_results):
 
     for compartment_results in scrape_regional_results:
         (compartment, instances) = compartment_results
+        logging.info(f'Creating instance dataframe for {compartment}')
         if instances:
             df_tmp = pd.DataFrame({'Compartment': compartment, 
                                    'AD': [x.availability_domain for x in instances],
@@ -72,6 +84,7 @@ def create_volume_dataframe(scrape_regional_results):
 
     for compartment_results in scrape_regional_results:
         (compartment, volumes) = compartment_results
+        logging.info(f'Creating volume dataframe for {compartment}')
         if volumes:
             df_tmp = pd.DataFrame({'Compartment': compartment, 
                                    'AD': [x.availability_domain for x in volumes],
@@ -95,6 +108,7 @@ def create_vcn_dataframe(scrape_regional_results):
                                             
     for compartment_results in scrape_regional_results:
         (compartment, networks) = compartment_results
+        logging.info(f'Creating vcn dataframe for {compartment}')
         if networks:
             df_tmp = pd.DataFrame({'Compartment': compartment, 
                                    'CIDR block': [x.cidr_block for x in networks],
@@ -116,6 +130,7 @@ def create_loadbalancer_dataframe(scrape_f):
                                             
     for results in scrape_f:
         (compartment, loadbalancers) = results
+        logging.info(f'Creating load balancer dataframe for {compartment}')
         if loadbalancers:
             df_tmp = pd.DataFrame({'Compartment': compartment, 
                                    'Name': [x.display_name for x in loadbalancers],
@@ -139,9 +154,11 @@ def scrape_service_elements(compartments, list_function, lc_state):
         It will yield for each compartment the compartment name and list of elements.
     """
     for c_name, c_id in compartments.items():
+        logging.info(f'Scraping elements for {c_name}')
         elements_raw = list_function(c_id, lifecycle_state=lc_state)
         elements = elements_raw.data
         while elements_raw.has_next_page:
+            logging.info('Processing another page')
             elements_raw = list_function(c_id, lifecycle_state=lc_state,
                                                   page=elements_raw.next_page)
             elements.extend(elements_raw.data)
@@ -151,32 +168,31 @@ def scrape_service_elements(compartments, list_function, lc_state):
 @timer
 def scrape_a_region(region):
     """ """
-    config = oci.config.from_file(profile_name=region.region_key)
-    ic = oci.identity.IdentityClient(config)
-    compartments = {
-                    c.name.lower(): c.id 
-                    for c in ic.list_compartments(config['tenancy']).data
+    cfg = from_file(profile_name=region.region_key)
+    logging.info(f'Scraping region {region}')
+
+    compartments = {c.name.lower(): c.id 
+                    for c in icli(cfg).list_compartments(cfg['tenancy']).data
                     }
 
     if not compartments:
-        raise ValueError('could not find any compartments.')
+        raise LookupError('could not find any compartments.')
 
     # We generalize in order to have one function to process all elements 
     # and not one per each. Shorter and easier to make changes in the future.
-    scrape_elements = partial(scrape_service_elements, compartments)
+    scrape = partial(scrape_service_elements, compartments)
 
-    instances = scrape_elements(oci.core.ComputeClient(config).list_instances, LC_STATE['INSTANCE'])
-    volumes = scrape_elements(oci.core.BlockstorageClient(config).list_volumes, LC_STATE['VOLUME'])
-    vcns = scrape_elements(oci.core.VirtualNetworkClient(config).list_vcns, LC_STATE['VCN'])
-    loadbalancers = scrape_elements(oci.load_balancer.LoadBalancerClient(config).list_load_balancers, 
-                                    LC_STATE['LOAD_BALANCER'])
-    
+    instances = scrape(ccli(cfg).list_instances, LC_STATE['INSTANCE'])
+    volumes = scrape(bscli(cfg).list_volumes, LC_STATE['VOLUME'])
+    vcns = scrape(netcli(cfg).list_vcns, LC_STATE['VCN'])
+    lbs = scrape(lbcli(cfg).list_load_balancers, LC_STATE['LOAD_BALANCER'])
+
     # We generate a dataframe per SubService, e.g. Compute->instance, Storage->volume
     # Network->vcn, Loadbalancer->loadbalancer.
     create_instance_dataframe(instances).to_csv(f'output/instance_{region.region_name}.csv')
     create_volume_dataframe(volumes).to_csv(f'output/volume_{region.region_name}.csv')
     create_vcn_dataframe(vcns).to_csv(f'output/vcn_{region.region_name}.csv')
-    create_loadbalancer_dataframe(loadbalancers).to_csv(f'output/loadbalancer_{region.region_name}.csv')
+    create_loadbalancer_dataframe(lbs).to_csv(f'output/loadbalancer_{region.region_name}.csv')
 
 
 @timer
@@ -187,14 +203,7 @@ def main() :
     if not subscribed_regions:
         ValueError('No subscribed regions found')
 
-    try:
-        logging.basicConfig(format='%(asctime)s %(message)s', datefmt='%m/%d/%Y %I:%M:%S %p', \
-                            filename="scrapper.log", level=logging.DEBUG)
-    except:
-        raise
-
     for region in subscribed_regions:
-        print(f'Scrapping {region}')
         scrape_a_region(region)
 
 
