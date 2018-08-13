@@ -43,6 +43,27 @@ def timer(func):
     return wrapf
 
 
+def create_df(subservice, columns):
+    """ This decorator takes the results of the scraper and creates a dataframe
+        based on them. It walks the results and generates a list of elements which
+        are the results of processing the results, then it calls the original
+        function with the new results (a bit inception in here, but it works perfectly!).
+    """
+    def decorate(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            df = pd.DataFrame({}, columns=columns)
+            for compartment_results in args[0]:
+                (compartment, elements) = compartment_results
+                logging.info(f'Creating {subservice} dataframe for {compartment}')
+                if elements:
+                    df = pd.concat([df, func(elements, compartment)], 
+                                    ignore_index=True, sort=False)
+            return df
+        return wrapper
+    return decorate
+
+
 @timer
 def get_subscribed_regions():
     """ Queries OCI for the subscribed regions and return a list with them.
@@ -54,92 +75,55 @@ def get_subscribed_regions():
     return icli(cfg).list_region_subscriptions(cfg['tenancy']).data
 
 
-def create_instance_dataframe(scrape_regional_results):
-    """ """
-    df = pd.DataFrame({}, columns=['Compartment', 'AD', 'Name', 'Shape', 
-                                   'Defined tags', 'Freeform tags', 'Time created'])
-
-    for compartment_results in scrape_regional_results:
-        (compartment, instances) = compartment_results
-        logging.info(f'Creating instance dataframe for {compartment}')
-        if instances:
-            df_tmp = pd.DataFrame({'Compartment': compartment, 
-                                   'AD': [x.availability_domain for x in instances],
-                                   'Name': [x.display_name for x in instances],
-                                   'Shape': [x.shape for x in instances],
-                                   'Defined tags': [x.defined_tags for x in instances],
-                                   'Freeform tags': [x.freeform_tags for x in instances],
-                                   'Time created': [x.time_created for x in instances],
-                                   })
-            df = pd.concat([df, df_tmp], ignore_index=True, sort=False)
-
-    return df
+@create_df('LB', ['Compartment', 'AD', 'Name', 'Shape', 
+                  'Defined tags', 'Freeform tags', 'Time created'])
+def get_instance_df(instances, compartment=None):
+    return pd.DataFrame({'Compartment': compartment, 
+                         'AD': [x.availability_domain for x in instances],
+                         'Name': [x.display_name for x in instances],
+                         'Shape': [x.shape for x in instances],
+                         'Defined tags': [x.defined_tags for x in instances],
+                         'Freeform tags': [x.freeform_tags for x in instances],
+                         'Time created': [x.time_created for x in instances],
+                         })
 
 
-def create_volume_dataframe(scrape_regional_results):
-    """ """
-    df = pd.DataFrame({}, columns=['Compartment', 'AD', 'Name', 
-                                    'Size GB', 'Size MB', 'Defined tags', 
-                                    'Freeform tags', 'Time created'])
-
-    for compartment_results in scrape_regional_results:
-        (compartment, volumes) = compartment_results
-        logging.info(f'Creating volume dataframe for {compartment}')
-        if volumes:
-            df_tmp = pd.DataFrame({'Compartment': compartment, 
-                                   'AD': [x.availability_domain for x in volumes],
-                                   'Name': [x.display_name for x in volumes],
-                                   'Size MB': [x.size_in_mbs for x in volumes],
-                                   'Size GB': [x.size_in_gbs for x in volumes],
-                                   'Defined tags': [x.defined_tags for x in volumes],
-                                   'Freeform tags': [x.freeform_tags for x in volumes],
-                                   'Time created': [x.time_created for x in volumes],
-                                   })
-            df = pd.concat([df, df_tmp], ignore_index=True, sort=False)
-
-    return df
+@create_df('Block Volume', ['Compartment', 'AD', 'Name', 'Size GB', 'Size MB', 
+                            'Defined tags', 'Freeform tags', 'Time created'])
+def get_bv_df(volumes, compartment=None):
+    return pd.DataFrame({'Compartment': compartment, 
+                         'AD': [x.availability_domain for x in volumes],
+                         'Name': [x.display_name for x in volumes],
+                         'Size MB': [x.size_in_mbs for x in volumes],
+                         'Size GB': [x.size_in_gbs for x in volumes],
+                         'Defined tags': [x.defined_tags for x in volumes],
+                         'Freeform tags': [x.freeform_tags for x in volumes],
+                         'Time created': [x.time_created for x in volumes],
+                         })
 
 
-def create_vcn_dataframe(scrape_regional_results):
-    """ """
-    df = pd.DataFrame({}, columns=['Compartment', 'CIDR block', 'Name', 
-                                    'DNS label', 'VCN domain name', 'Defined tags', 
-                                    'Freeform tags', 'Time created'])
-                                            
-    for compartment_results in scrape_regional_results:
-        (compartment, networks) = compartment_results
-        logging.info(f'Creating vcn dataframe for {compartment}')
-        if networks:
-            df_tmp = pd.DataFrame({'Compartment': compartment, 
-                                   'CIDR block': [x.cidr_block for x in networks],
-                                   'Name': [x.display_name for x in networks],
-                                   'DNS label': [x.dns_label for x in networks],
-                                   'VCN domain name': [x.vcn_domain_name for x in networks],
-                                   'Defined tags': [x.defined_tags for x in networks],
-                                   'Freeform tags': [x.freeform_tags for x in networks],
-                                   'Time created': [x.time_created for x in networks],
-                                   })
-            df = pd.concat([df, df_tmp], ignore_index=True, sort=False)
-
-    return df
+@create_df('VCN', 
+           ['Compartment', 'CIDR block', 'Name', 'DNS label', 'VCN domain name',
+            'Defined tags', 'Freeform tags', 'Time created'])
+def get_vcn_df(vcns, compartment=None):
+    return pd.DataFrame({'Compartment': compartment, 
+                         'CIDR block': [x.cidr_block for x in vcns],
+                         'Name': [x.display_name for x in vcns],
+                         'DNS label': [x.dns_label for x in vcns],
+                         'VCN domain name': [x.vcn_domain_name for x in vcns],
+                         'Defined tags': [x.defined_tags for x in vcns],
+                         'Freeform tags': [x.freeform_tags for x in vcns],
+                         'Time created': [x.time_created for x in vcns],
+                         })
 
 
-def create_loadbalancer_dataframe(scrape_f):
-    """ """
-    df = pd.DataFrame({}, columns=['Compartment', 'Name', 'Shape name', 'Time created'])
-                                            
-    for results in scrape_f:
-        (compartment, loadbalancers) = results
-        logging.info(f'Creating load balancer dataframe for {compartment}')
-        if loadbalancers:
-            df_tmp = pd.DataFrame({'Compartment': compartment, 
-                                   'Name': [x.display_name for x in loadbalancers],
-                                   'Shape name': [x.shape_name for x in loadbalancers],
-                                   'Time created': [x.time_created for x in loadbalancers],
-                                   })
-            df = pd.concat([df, df_tmp], ignore_index=True, sort=False)
-
-    return df
+@create_df('Load Balancer', ['Compartment', 'Name', 'Shape name', 'Time created'])
+def get_lb_df(loadbalancers, compartment=None):    
+    return pd.DataFrame({'Compartment': compartment, 
+                         'Name': [x.display_name for x in loadbalancers],
+                         'Shape name': [x.shape_name for x in loadbalancers],
+                         'Time created': [x.time_created for x in loadbalancers],
+                         })
 
 
 @timer
@@ -189,10 +173,10 @@ def scrape_a_region(region):
 
     # We generate a dataframe per SubService, e.g. Compute->instance, Storage->volume
     # Network->vcn, Loadbalancer->loadbalancer.
-    create_instance_dataframe(instances).to_csv(f'output/instance_{region.region_name}.csv')
-    create_volume_dataframe(volumes).to_csv(f'output/volume_{region.region_name}.csv')
-    create_vcn_dataframe(vcns).to_csv(f'output/vcn_{region.region_name}.csv')
-    create_loadbalancer_dataframe(lbs).to_csv(f'output/loadbalancer_{region.region_name}.csv')
+    get_instance_df(instances).to_csv(f'output/instance_{region.region_name}.csv')
+    get_bv_df(volumes).to_csv(f'output/volume_{region.region_name}.csv')
+    get_vcn_df(vcns).to_csv(f'output/vcn_{region.region_name}.csv')
+    get_lb_df(lbs).to_csv(f'output/loadbalancer_{region.region_name}.csv')
 
 
 @timer
