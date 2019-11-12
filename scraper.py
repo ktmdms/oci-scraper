@@ -163,7 +163,6 @@ def scrape_a_region(region):
     compartments = {c.id: c.name.lower()
                     for c in icli(cfg).list_compartments(cfg['tenancy'], compartment_id_in_subtree=True).data
                     }
-    print (compartments)
 
     if not compartments:
         raise LookupError('could not find any compartments.')
