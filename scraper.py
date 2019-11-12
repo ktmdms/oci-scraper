@@ -139,7 +139,8 @@ def scrape_service_elements(compartments, list_function, lc_state):
 
         It will yield for each compartment the name and list of elements.
     """
-    for c_name, c_id in compartments.items():
+    #Must read the items in id->name since that is how were are colating the compartment info.
+    for c_id, c_name in compartments.items():
         logging.info(f'Scraping elements for {c_name}')
         elements_raw = list_function(c_id, lifecycle_state=lc_state)
         elements = elements_raw.data
@@ -157,9 +158,12 @@ def scrape_a_region(region):
     cfg = from_file(profile_name=region.region_key)
     logging.info(f'Scraping region {region}')
 
-    compartments = {c.name.lower(): c.id
-                    for c in icli(cfg).list_compartments(cfg['tenancy']).data
+    #In order to accomodate child compartments *and* compartments that my be named the same in different regions, compartment
+    #Id comes before compartment Name in compartments and compartment_id_in_subtree is defined in the icli call.
+    compartments = {c.id: c.name.lower()
+                    for c in icli(cfg).list_compartments(cfg['tenancy'], compartment_id_in_subtree=True).data
                     }
+    print (compartments)
 
     if not compartments:
         raise LookupError('could not find any compartments.')
